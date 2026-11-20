@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Books</title>
+<link rel="stylesheet" href="static/style.css">
+<link rel="icon" href="static/icon.png">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3v15h3V3H9m3 2 4 13 3-1-4-13-3 1M5 5v13h3V5H5M3 19v2h18v-2H3Z"/></svg>
+    <h1>Books</h1>
+    <span id="count" class="count"></span>
+  </div>
+  <div class="search">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.5 3a6.5 6.5 0 0 1 5.25 10.33l5.46 5.46-1.42 1.42-5.46-5.46A6.5 6.5 0 1 1 9.5 3m0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9Z"/></svg>
+    <input id="q" type="search" placeholder="Search title, author, ISBN, publisher…" autocomplete="off">
+  </div>
+  <div class="actions">
+    <button id="btnAdd" class="primary"><span>+</span> Add book</button>
+    <div class="menu">
+      <button id="btnMenu" class="icon" aria-label="More">⋮</button>
+      <div id="menu" class="menu-pop" hidden>
+        <button data-act="import">Import CLZ export (XML)…</button>
+        <a href="api/export.csv" download>Export as CSV</a>
+        <a href="api/export.json" download>Export as JSON</a>
+        <button data-act="covers">Retry missing covers</button>
+        <div id="statsLine" class="menu-note"></div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<nav class="toolbar">
+  <div class="chips" id="chips">
+    <button data-f="all" class="on">All</button>
+    <button data-f="unread">Unread</button>
+    <button data-f="read">Read</button>
+    <button data-f="wishlist">Wishlist</button>
+  </div>
+  <select id="lang" aria-label="Language"><option value="">All languages</option></select>
+  <select id="sort" aria-label="Sort">
+    <option value="author">Author</option>
+    <option value="title">Title</option>
+    <option value="added">Recently added</option>
+    <option value="year">Publication year</option>
+  </select>
+  <div class="seg" id="view">
+    <button data-v="grid" class="on" title="Covers">▦</button>
+    <button data-v="list" title="List">☰</button>
+  </div>
+</nav>
+
+<main id="main">
+  <div id="grid" class="grid"></div>
+  <div id="empty" class="empty" hidden>
+    <h2>No books yet</h2>
+    <p>Import your CLZ export, or add a book by ISBN or by author and title.</p>
+    <p><button class="primary" data-act="import">Import CLZ XML</button> <button data-act="add">Add a book</button></p>
+  </div>
+</main>
+
+<!-- book details -->
+<div id="detail" class="sheet" hidden>
+  <div class="sheet-card wide">
+    <button class="close" data-close aria-label="Close">×</button>
+    <div id="detailBody"></div>
+  </div>
+</div>
+
+<!-- author -->
+<div id="author" class="sheet" hidden>
+  <div class="sheet-card">
+    <button class="close" data-close aria-label="Close">×</button>
+    <div id="authorBody"></div>
+  </div>
+</div>
+
+<!-- add book -->
+<div id="add" class="sheet" hidden>
+  <div class="sheet-card wide">
+    <button class="close" data-close aria-label="Close">×</button>
+    <h2>Add a book</h2>
+    <div class="tabs" id="addTabs">
+      <button data-t="isbn" class="on">ISBN / barcode</button>
+      <button data-t="search">Author &amp; title</button>
+      <button data-t="manual">Manual</button>
+    </div>
+    <form id="fIsbn" class="addform">
+      <input id="isbn" inputmode="numeric" placeholder="ISBN, e.g. 9789022981689 — or use a USB scanner" autocomplete="off">
+      <button type="button" id="btnScan" title="Scan with camera">📷 Scan</button>
+      <button class="primary" type="submit">Search</button>
+    </form>
+    <form id="fSearch" class="addform" hidden>
+      <input id="sAuthor" placeholder="Author" autocomplete="off">
+      <input id="sTitle" placeholder="Title" autocomplete="off">
+      <button class="primary" type="submit">Search</button>
+    </form>
+    <div id="scanBox" class="scan" hidden>
+      <video id="video" playsinline muted></video>
+      <div class="scan-line"></div>
+      <div class="scan-actions">
+        <label class="btnlike">Take photo instead<input id="photo" type="file" accept="image/*" capture="environment" hidden></label>
+        <button type="button" id="btnStopScan">Stop</button>
+      </div>
+    </div>
+    <div id="addMsg" class="msg"></div>
+    <div id="results" class="results"></div>
+  </div>
+</div>
+
+<!-- edit -->
+<div id="edit" class="sheet" hidden>
+  <div class="sheet-card wide">
+    <button class="close" data-close aria-label="Close">×</button>
+    <h2 id="editTitle">Edit book</h2>
+    <form id="fEdit" class="edit">
+      <div class="edit-cover">
+        <img id="eCover" alt="" onerror="this.style.visibility='hidden'" onload="this.style.visibility='visible'">
+        <input name="cover_url" placeholder="Cover image URL">
+        <button type="button" id="btnFill" title="Fill empty fields from Open Library / Google Books">🔎 Fill missing from internet</button>
+      </div>
+      <div class="edit-fields">
+        <label class="span2">Title<input name="title" required></label>
+        <label class="span2">Subtitle<input name="subtitle"></label>
+        <label class="span2">Author(s) <small>separate with ;</small><input name="authors"></label>
+        <label>Series<input name="series"></label>
+        <label>ISBN<input name="isbn" inputmode="numeric"></label>
+        <label>Publisher<input name="publisher"></label>
+        <label>Year<input name="pub_year" type="number" min="0" max="2999"></label>
+        <label>Pages<input name="pages" type="number" min="0"></label>
+        <label>Language<input name="language" list="langList"></label>
+        <label>Format<input name="format" list="formatList"></label>
+        <label>Location<input name="location" list="locList"></label>
+        <label>Status<select name="status"><option value="collection">In collection</option><option value="wishlist">Wishlist</option></select></label>
+        <label>Owner<input name="owner"></label>
+        <label class="check"><input type="checkbox" name="read"> I've read it</label>
+        <label>Read on<input name="read_date" type="date"></label>
+        <label>Rating<select name="rating"><option value="0">–</option><option value="1">★</option><option value="2">★★</option><option value="3">★★★</option><option value="4">★★★★</option><option value="5">★★★★★</option></select></label>
+        <label>Purchased<input name="purchase_date" type="date"></label>
+        <label>Price<input name="purchase_price"></label>
+        <label>Store<input name="store"></label>
+        <label class="span2">Subjects <small>separate with ;</small><input name="subjects"></label>
+        <label class="span2">Tags <small>separate with ;</small><input name="tags"></label>
+        <label class="span2">Description<textarea name="plot" rows="4"></textarea></label>
+        <label class="span2">Notes<textarea name="notes" rows="2"></textarea></label>
+      </div>
+      <div class="edit-actions">
+        <span id="editMsg" class="msg"></span>
+        <button type="button" data-close>Cancel</button>
+        <button class="primary" type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<datalist id="langList"></datalist>
+<datalist id="formatList"></datalist>
+<datalist id="locList"></datalist>
+<input id="importFile" type="file" accept=".xml,text/xml" hidden>
+<div id="toast" class="toast" hidden></div>
+
+<script src="static/zxing.min.js" defer></script>
+<script src="static/app.js" defer></script>
+</body>
+</html>
