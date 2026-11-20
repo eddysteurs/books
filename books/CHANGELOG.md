@@ -12,3 +12,6 @@
 - Covers are always served by the app itself (CLZ's image server blocks hotlinking), and a
   cover that isn't stored yet is fetched on the spot — no more blank covers right after import.
 - Books without a cover get one from Open Library (by ISBN) when available.
+
+## 0.1.3
+- Fix: covers were hidden behind the coloured placeholder in tile view.

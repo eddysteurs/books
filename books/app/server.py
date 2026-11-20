@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import clz  # noqa: E402
 import lookup  # noqa: E402
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 DATA_DIR = os.environ.get("BOOKS_DATA", "/data")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 DB_PATH = os.path.join(DATA_DIR, "books.db")
