@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import clz  # noqa: E402
 import lookup  # noqa: E402
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 DATA_DIR = os.environ.get("BOOKS_DATA", "/data")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 DB_PATH = os.path.join(DATA_DIR, "books.db")
@@ -367,12 +367,14 @@ class Handler(BaseHTTPRequestHandler):
                 dupes = [dict(r) for r in con.execute(
                     "SELECT id, title FROM books WHERE isbn IN (%s)" % ",".join("?" * len(lookup.isbn_variants(isbn))),
                     lookup.isbn_variants(isbn))]
-            return self.send_json({"results": lookup.lookup_isbn(isbn, OPTIONS.get("google_books_api_key", "")),
-                                   "already_have": dupes})
+            warn = []
+            res = lookup.lookup_isbn(isbn, OPTIONS.get("google_books_api_key", ""), warn)
+            return self.send_json({"results": res, "already_have": dupes, "warnings": warn})
         if path == "/api/lookup/search":
+            warn = []
             res = lookup.search(q.get("title", "").strip(), q.get("author", "").strip(), q.get("q", "").strip(),
-                                OPTIONS.get("google_books_api_key", ""))
-            return self.send_json({"results": res})
+                                OPTIONS.get("google_books_api_key", ""), warn)
+            return self.send_json({"results": res, "warnings": warn})
         if path == "/api/author":
             name = q.get("name", "").strip()
             if not name:

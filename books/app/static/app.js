@@ -247,6 +247,7 @@ async function runIsbn(isbn) {
       $("#results").innerHTML = `<p><button data-manual>Enter manually with ISBN ${esc(isbn)}</button></p>`;
       $("#results [data-manual]").onclick = () => { close("add"); editBook(null, { isbn, title: "" }); };
     } else { setAddMsg(""); renderResults(d.results, d.already_have); }
+    if (d.warnings?.length) setAddMsg(d.warnings.join(" "), true);
   } catch (err) { setAddMsg(err.message, true); }
 }
 
@@ -258,6 +259,7 @@ async function runSearch() {
     const d = await api(`api/lookup/search?author=${encodeURIComponent(author)}&title=${encodeURIComponent(title)}`);
     setAddMsg(d.results.length ? `${d.results.length} results` : "Nothing found. Try fewer words, or enter it manually.", !d.results.length);
     renderResults(d.results);
+    if (d.warnings?.length) setAddMsg(d.warnings.join(" "), true);
   } catch (err) { setAddMsg(err.message, true); }
 }
 

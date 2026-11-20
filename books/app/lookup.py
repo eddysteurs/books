@@ -36,11 +36,18 @@ def _get_json(url, params=None):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _safe(fn, *args, **kwargs):
+def _safe(fn, *args, warnings=None, **kwargs):
     try:
         return fn(*args, **kwargs)
     except Exception as exc:  # network errors must never break the UI
         print(f"[lookup] {fn.__name__} failed: {exc}", flush=True)
+        if warnings is not None:
+            src = "Google Books" if fn.__name__.startswith("_gb") else "Open Library"
+            if getattr(exc, "code", None) == 429 and src == "Google Books":
+                warnings.append("Google Books refused the lookup (rate limit). Add a free Google Books "
+                                "API key in the app's Configuration tab to fix this.")
+            else:
+                warnings.append(f"{src} could not be reached ({exc}).")
         return None
 
 
@@ -207,15 +214,15 @@ def merge(primary, *others):
     return out
 
 
-def lookup_isbn(isbn, api_key=""):
+def lookup_isbn(isbn, api_key="", warnings=None):
     """Look a book up by ISBN. Returns a list: merged best result first, then per-source results."""
     results = []
     for variant in isbn_variants(isbn):
-        ol = _safe(_ol_isbn, variant)
+        ol = _safe(_ol_isbn, variant, warnings=warnings)
         if ol:
             results.append(ol)
             break
-    gb = _safe(_gb_query, f"isbn:{clean_isbn(isbn)}", api_key, 3) or []
+    gb = _safe(_gb_query, f"isbn:{clean_isbn(isbn)}", api_key, 3, warnings=warnings) or []
     results.extend(gb[:1])
     if not results:
         return []
@@ -226,12 +233,12 @@ def lookup_isbn(isbn, api_key=""):
     return [best] + (results if len(results) > 1 else [])
 
 
-def search(title="", author="", q="", api_key=""):
+def search(title="", author="", q="", api_key="", warnings=None):
     """Free-text / title+author search across both sources, interleaved."""
     gb_query = q or " ".join(filter(None, [f"intitle:{title}" if title else "",
                                            f"inauthor:{author}" if author else ""]))
-    gb = _safe(_gb_query, gb_query, api_key, 10) or [] if gb_query else []
-    ol = _safe(_ol_search, title, author, q, 10) or []
+    gb = (_safe(_gb_query, gb_query, api_key, 10, warnings=warnings) or []) if gb_query else []
+    ol = _safe(_ol_search, title, author, q, 10, warnings=warnings) or []
     out, seen = [], set()
     for i in range(max(len(gb), len(ol))):
         for lst in (gb, ol):
