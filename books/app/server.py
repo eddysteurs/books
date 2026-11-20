@@ -16,13 +16,14 @@ import time
 import traceback
 import urllib.parse
 import urllib.request
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import clz  # noqa: E402
 import lookup  # noqa: E402
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 DATA_DIR = os.environ.get("BOOKS_DATA", "/data")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 DB_PATH = os.path.join(DATA_DIR, "books.db")
@@ -89,7 +90,12 @@ def row_to_dict(row):
                 d[c] = json.loads(d[c]) if d[c] else []
             except ValueError:
                 d[c] = []
-    d["cover"] = f"covers/{d['cover_file']}" if d.get("cover_file") else (d.get("cover_url") or "")
+    # Always serve covers through the app (CLZ's CDN blocks images shown on other sites).
+    # The ?v= part changes when the cover URL changes, so browsers pick up a new cover.
+    if d.get("cover_url") or d.get("cover_file"):
+        d["cover"] = f"covers/{d['id']}?v={zlib.crc32((d.get('cover_url') or '').encode()):x}"
+    else:
+        d["cover"] = ""
     return d
 
 
@@ -185,6 +191,18 @@ def cover_worker():
             todo = [(r["id"], r["cover_url"]) for r in con.execute(
                 "SELECT id, cover_url FROM books WHERE cover_url != '' AND cover_url IS NOT NULL "
                 "AND (cover_file IS NULL OR cover_file = '')") if r["id"] not in failed_ids]
+        with db() as con:
+            missing = [(r["id"], r["isbn"]) for r in con.execute(
+                "SELECT id, isbn FROM books WHERE (cover_url IS NULL OR cover_url='') AND isbn != '' "
+                "AND isbn IS NOT NULL") if r["id"] not in failed_ids]
+        for book_id, isbn in missing:  # books without a cover: try Open Library by ISBN
+            url = f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg?default=false"
+            try:
+                name = _download_cover(book_id, url)
+                with write_lock, db() as con:
+                    con.execute("UPDATE books SET cover_url=?, cover_file=? WHERE id=?", (url, name, book_id))
+            except Exception:
+                failed_ids.add(book_id)
         if not todo:
             continue
         cover_state.update(running=True, done=0, total=len(todo), failed=0)
@@ -302,6 +320,24 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def serve_cover(self, book_id):
+        with db() as con:
+            row = con.execute("SELECT cover_url, cover_file FROM books WHERE id=?", (book_id,)).fetchone()
+        if not row:
+            return self.send_json({"error": "not found"}, 404)
+        name = row["cover_file"]
+        if not (name and os.path.isfile(os.path.join(COVER_DIR, name))) and row["cover_url"]:
+            try:  # not cached yet: fetch it now and keep it
+                name = _download_cover(book_id, row["cover_url"])
+                with write_lock, db() as con:
+                    con.execute("UPDATE books SET cover_file=? WHERE id=?", (name, book_id))
+            except Exception as exc:
+                print(f"[covers] book {book_id}: {exc}", flush=True)
+                name = None
+        if not name:
+            return self.send_json({"error": "no cover"}, 404)
+        return self.send_file(os.path.join(COVER_DIR, name), cache="max-age=604800")
+
     def body(self):
         n = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(n) if n else b""
@@ -347,6 +383,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/static/"):
             name = os.path.basename(path)
             return self.send_file(os.path.join(STATIC_DIR, name), cache="max-age=3600")
+        m = re.fullmatch(r"/covers/(\d+)", path)
+        if m:
+            return self.serve_cover(int(m.group(1)))
         if path.startswith("/covers/"):
             name = os.path.basename(path)
             return self.send_file(os.path.join(COVER_DIR, name), cache="max-age=604800")

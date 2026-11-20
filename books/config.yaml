@@ -1,5 +1,5 @@
 name: Books
-version: "0.1.1"
+version: "0.1.2"
 slug: books
 description: Catalogue your book collection — ISBN & author/title lookup, barcode scanning, CLZ import
 url: https://github.com/eddysteurs/books
