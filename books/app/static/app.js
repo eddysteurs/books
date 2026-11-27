@@ -6,7 +6,8 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const state = { books: [], filter: "all", sort: localStorage.getItem("books.sort") || "author",
-  view: localStorage.getItem("books.view") || "grid", lang: "", q: "", editing: null };
+  view: localStorage.getItem("books.view") || "grid", lang: "", q: "", editing: null,
+  selected: new Set(), lastPicked: null, visible: [] };
 
 async function api(path, opts = {}) {
   const res = await fetch(path, opts);
@@ -46,6 +47,8 @@ function coverHtml(b, badge = true) {
   return `<div class="cover">${ph}${img}${bd}</div>`;
 }
 
+const statusRank = (b) => (b.status === "wishlist" ? 2 : b.read ? 1 : 0);
+
 function visibleBooks() {
   const terms = norm(state.q).split(/\s+/).filter(Boolean);
   let list = state.books.filter((b) => {
@@ -62,22 +65,39 @@ function visibleBooks() {
     title: (a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }),
     added: (a, b) => (b.added_at || 0) - (a.added_at || 0) || b.id - a.id,
     year: (a, b) => (b.pub_year || 0) - (a.pub_year || 0),
+    location: (a, b) => (a.location || "\uffff").localeCompare(b.location || "\uffff") || sortKey(a).localeCompare(sortKey(b)),
+    status: (a, b) => statusRank(a) - statusRank(b) || sortKey(a).localeCompare(sortKey(b)),
   }[state.sort];
   return list.sort(cmp);
 }
 
 function render() {
   const list = visibleBooks();
+  state.visible = list;
+  const ids = new Set(state.books.map((b) => b.id));
+  for (const id of state.selected) if (!ids.has(id)) state.selected.delete(id);
   const grid = $("#grid");
-  grid.className = "grid" + (state.view === "list" ? " list" : "");
-  grid.innerHTML = list.map((b) => `
-    <div class="book" data-id="${b.id}">
+  grid.className = "grid" + (state.view === "list" ? " list" : "") + (state.selected.size ? " selecting" : "");
+  const allOn = list.length > 0 && list.every((b) => state.selected.has(b.id));
+  const sortHead = (key, label) => `<button class="hs ${state.sort === key ? "on" : ""}" data-sort="${key}">${label}</button>`;
+  const head = state.view === "list" ? `
+    <div class="lhead">
+      <label class="sel"><input type="checkbox" data-selall ${allOn ? "checked" : ""} title="Select all shown"></label>
+      <span></span>${sortHead("title", "Title")}${sortHead("author", "Author")}${sortHead("year", "Year")}
+      <span class="hr">Read</span>${sortHead("status", "Status")}${sortHead("location", "Location")}
+    </div>` : "";
+  grid.innerHTML = head + list.map((b) => `
+    <div class="book ${state.selected.has(b.id) ? "picked" : ""}" data-id="${b.id}">
+      <label class="sel"><input type="checkbox" data-sel="${b.id}" ${state.selected.has(b.id) ? "checked" : ""}></label>
       ${coverHtml(b)}
       <div class="t">${esc(b.title)}</div>
       <div class="a">${esc((b.authors || []).join(", "))}</div>
       <div class="y">${esc(b.pub_year || "")}</div>
-      <div class="s ${b.status === "wishlist" ? "wish" : b.read ? "read" : ""}">${b.status === "wishlist" ? "Wishlist" : b.read ? "Read" : "Unread"}</div>
+      <div class="r ${b.read ? "read" : ""}">${b.read ? "✓ Read" : "Unread"}</div>
+      <div class="st ${b.status === "wishlist" ? "wish" : ""}">${b.status === "wishlist" ? "Wishlist" : "Collection"}</div>
+      <div class="loc">${esc(b.location || "")}</div>
     </div>`).join("");
+  renderBulkBar();
   const owned = state.books.filter((b) => b.status !== "wishlist").length;
   $("#count").textContent = list.length === state.books.length ? `${owned} books` : `${list.length} of ${state.books.length}`;
   $("#empty").hidden = state.books.length > 0;
@@ -413,7 +433,87 @@ $("#view").addEventListener("click", (e) => {
   state.view = b.dataset.v; localStorage.setItem("books.view", state.view);
   $$("#view button").forEach((x) => x.classList.toggle("on", x === b)); render();
 });
-$("#grid").addEventListener("click", (e) => { const b = e.target.closest(".book"); if (b) showBook(b.dataset.id); });
+$("#grid").addEventListener("click", (e) => {
+  const sort = e.target.closest("[data-sort]");
+  if (sort) { state.sort = sort.dataset.sort; $("#sort").value = state.sort; localStorage.setItem("books.sort", state.sort); return render(); }
+  const all = e.target.closest("[data-selall]");
+  if (all) {
+    state.visible.forEach((b) => (all.checked ? state.selected.add(b.id) : state.selected.delete(b.id)));
+    return render();
+  }
+  const box = e.target.closest("[data-sel]");
+  if (box) { pick(+box.dataset.sel, box.checked, e.shiftKey); return; }
+  if (e.target.closest(".sel")) return;  // click on the checkbox's padding
+  const b = e.target.closest(".book");
+  if (!b) return;
+  if (state.selected.size) { pick(+b.dataset.id, !state.selected.has(+b.dataset.id), e.shiftKey); return; }
+  showBook(b.dataset.id);
+});
+
+/* ------------------------------------------------------------ selection & bulk actions */
+
+function pick(id, on, range) {
+  const order = state.visible.map((b) => b.id);
+  if (range && state.lastPicked !== null && order.includes(state.lastPicked)) {
+    const [a, z] = [order.indexOf(state.lastPicked), order.indexOf(id)].sort((x, y) => x - y);
+    order.slice(a, z + 1).forEach((x) => (on ? state.selected.add(x) : state.selected.delete(x)));
+  } else if (on) state.selected.add(id); else state.selected.delete(id);
+  state.lastPicked = id;
+  render();
+}
+
+function clearSelection() { state.selected.clear(); state.lastPicked = null; render(); }
+
+function renderBulkBar() {
+  const n = state.selected.size;
+  $("#bulk").hidden = !n;
+  document.body.classList.toggle("has-bulk", !!n);
+  if (!n) { $("#bulkLoc").hidden = true; return; }
+  $("#bulkCount").textContent = `${n} selected`;
+  const shown = state.visible.length;
+  $("#bulkAll").textContent = `Select all ${shown} shown`;
+  $("#bulkAll").hidden = state.visible.every((b) => state.selected.has(b.id));
+}
+
+async function bulk(action, changes) {
+  const ids = [...state.selected];
+  const res = await api("api/books/bulk", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, action, changes }) });
+  if (action === "delete") state.selected.clear();
+  await load();
+  return res.count;
+}
+
+$("#bulk").addEventListener("click", async (e) => {
+  const act = e.target.closest("[data-bulk]")?.dataset.bulk;
+  if (!act) return;
+  const n = state.selected.size;
+  try {
+    if (act === "all") { state.visible.forEach((b) => state.selected.add(b.id)); return render(); }
+    if (act === "clear") return clearSelection();
+    if (act === "loc") { $("#bulkLoc").hidden = !$("#bulkLoc").hidden; if (!$("#bulkLoc").hidden) $("#bulkLocInput").focus(); return; }
+    if (act === "delete") {
+      if (!confirm(`Delete ${n} book${n > 1 ? "s" : ""}? This can't be undone.`)) return;
+      await bulk("delete"); toast(`Deleted ${n} book${n > 1 ? "s" : ""}`); return;
+    }
+    const changes = { read: { read: true }, unread: { read: false }, collection: { status: "collection" },
+      wishlist: { status: "wishlist" } }[act];
+    if (changes) {
+      await bulk("update", changes);
+      toast(`Updated ${n} book${n > 1 ? "s" : ""}`);
+    }
+  } catch (err) { toast("Failed: " + err.message, 6000); }
+});
+
+$("#bulkLoc").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const loc = $("#bulkLocInput").value.trim(), n = state.selected.size;
+  try {
+    await bulk("update", { location: loc });
+    $("#bulkLoc").hidden = true; $("#bulkLocInput").value = "";
+    toast(loc ? `Moved ${n} book${n > 1 ? "s" : ""} to “${loc}”` : `Cleared location of ${n} book${n > 1 ? "s" : ""}`);
+  } catch (err) { toast("Failed: " + err.message, 6000); }
+});
 $("#btnAdd").addEventListener("click", () => openAdd("isbn"));
 $("#addTabs").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) switchTab(b.dataset.t); });
 $("#fIsbn").addEventListener("submit", (e) => { e.preventDefault(); runIsbn(); });
@@ -445,7 +545,10 @@ document.addEventListener("click", (e) => {
   if (e.target.classList.contains("sheet")) close(e.target.id);
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { const s = $$(".sheet").reverse().find((x) => !x.hidden); if (s) close(s.id); }
+  if (e.key === "Escape") {
+    const s = $$(".sheet").reverse().find((x) => !x.hidden);
+    if (s) close(s.id); else if (state.selected.size) clearSelection();
+  }
   if (e.key === "/" && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "TEXTAREA") { e.preventDefault(); $("#q").focus(); }
 });
 

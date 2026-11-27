@@ -15,3 +15,9 @@
 
 ## 0.1.3
 - Fix: covers were hidden behind the coloured placeholder in tile view.
+
+## 0.2.0
+- List view: separate Read, Status and Location columns; click a column header to sort.
+- Select books with checkboxes (shift-click selects a range, header box selects all shown) and
+  delete them, mark them read/unread, move them to collection/wishlist or set their location in one go.
+- New sort options: Status and Location.

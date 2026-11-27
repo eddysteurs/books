@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import clz  # noqa: E402
 import lookup  # noqa: E402
 
-VERSION = "0.1.3"
+VERSION = "0.2.0"
 DATA_DIR = os.environ.get("BOOKS_DATA", "/data")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 DB_PATH = os.path.join(DATA_DIR, "books.db")
@@ -489,6 +489,44 @@ class Handler(BaseHTTPRequestHandler):
             cover_event.set()
             threading.Thread(target=publish_sensors, daemon=True).start()
             return self.send_json({"added": added, "updated": updated, "total": len(books)})
+        if path == "/api/books/bulk":
+            data = self.json_body()
+            ids = [int(i) for i in data.get("ids", []) if str(i).isdigit()]
+            if not ids:
+                return self.send_json({"error": "No books selected"}, 400)
+            marks = ",".join("?" * len(ids))
+            if data.get("action") == "delete":
+                with write_lock, db() as con:
+                    files = [r["cover_file"] for r in con.execute(
+                        f"SELECT cover_file FROM books WHERE id IN ({marks})", ids) if r["cover_file"]]
+                    n = con.execute(f"DELETE FROM books WHERE id IN ({marks})", ids).rowcount
+                for f in files:
+                    try:
+                        os.remove(os.path.join(COVER_DIR, f))
+                    except OSError:
+                        pass
+            elif data.get("action") == "update":
+                allowed = {"read", "status", "location", "owner", "rating", "format", "language"}
+                changes = {k: v for k, v in (data.get("changes") or {}).items() if k in allowed}
+                if changes.get("status") not in (None, "collection", "wishlist"):
+                    return self.send_json({"error": "Unknown status"}, 400)
+                if not changes:
+                    return self.send_json({"error": "Nothing to change"}, 400)
+                today = time.strftime("%Y-%m-%d")
+                with write_lock, db() as con:
+                    for book_id in ids:
+                        row = con.execute("SELECT read, read_date FROM books WHERE id=?", (book_id,)).fetchone()
+                        if not row:
+                            continue
+                        c = dict(changes)
+                        if c.get("read") and not row["read"] and not row["read_date"]:
+                            c["read_date"] = today
+                        update_book(con, book_id, c)
+                n = len(ids)
+            else:
+                return self.send_json({"error": "Unknown action"}, 400)
+            threading.Thread(target=publish_sensors, daemon=True).start()
+            return self.send_json({"ok": True, "count": n})
         if path == "/api/covers/retry":
             cover_failed.clear()
             cover_event.set()
